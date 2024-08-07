@@ -18,6 +18,6 @@ class GroqClient:
     def __init__(self):
         self.client = Groq(api_key=os.environ.get("GROQ_TOKEN"))
 
-    def categorize(self, transactions):
+    def categorize(self, bank, transactions):
         # TODO
         pass

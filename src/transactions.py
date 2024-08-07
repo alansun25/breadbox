@@ -11,7 +11,8 @@ def get_file_string(directory, provider):
 def get_parsed_transactions(transactions_folder):
     directory = f"./transactions/{transactions_folder}"
     return {
-        bank: parse_transactions(get_file_string(directory, bank)) for bank in BANKS
+        bank: parse_transactions(get_file_string(directory, bank))
+        for bank in BANKS
     }
 
 

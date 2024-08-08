@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
 from dotenv import load_dotenv
-from transactions import update_transactions_table
+from src.functions import update_transactions_table
 
 
 def main():

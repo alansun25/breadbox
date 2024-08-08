@@ -1,3 +1,4 @@
 .*env
 transactions
 scrap.py
+__*

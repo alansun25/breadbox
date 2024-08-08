@@ -60,7 +60,6 @@ class GroqClient:
     def __init__(self, categories: dict[str, str]):
         self.client = Groq(api_key=os.environ.get("GROQ_TOKEN"))
         self.categories = categories
-        self.tries = 0
         self.system_message = self.get_system_message()
 
     def get_system_message(self):
@@ -100,10 +99,6 @@ class GroqClient:
             return formatted_prompt
 
     def get_categories(self, prompt):
-        # TODO: The LLM has trouble handling a lot of transactions at once.
-        # Break this into a multi-turn conversation that processes 10
-        # transactions at a time. Need to modify prompt.
-
         chat_completion = self.client.chat.completions.create(
             messages=[
                 {
@@ -126,42 +121,55 @@ class GroqClient:
         transactions: list[Transaction],
     ):
         if response is None:
-            print("No response received.")
-            return False
+            return False, "No response received."
 
         llm_categories = [category.strip() for category in response.split(",")]
 
         num_categories = len(llm_categories)
         num_transactions = len(transactions)
         if not num_categories == num_transactions:
-            print(
-                f"Invalid response string. Num categories: {num_categories}, Num transactions: {num_transactions}"
+            return (
+                False,
+                f"Invalid response string. Num categories: {num_categories}, Num transactions: {num_transactions}",
             )
-            return False
 
         if not all(
             category in self.categories.keys() for category in llm_categories
         ):
-            print(f"Invalid categories received in response.")
-            return False
+            return False, f"Invalid categories received in response."
+
+        return True, None
 
     def attach_categories(
         self,
-        generated_categories: str,
+        response: str,
+        transactions: list[Transaction],
     ):
-        categories = generated_categories.split(", ")
+        categories = [category.strip() for category in response.split(",")]
+        for i, transaction in enumerate(transactions):
+            transaction["category"] = categories[i]
+
+        return transactions
 
     def categorize_transactions(self, transactions: list[Transaction]):
-        self.tries += 1
-        prompt = self.generate_prompt(transactions)
-        response = self.get_categories(prompt)
+        for i in range(0, len(transactions), 10):
+            subset = transactions[i : i + 10]
+            prompt = self.generate_prompt(subset)
+            response = self.get_categories(prompt)
 
-        if not self.valid_response(response, transactions):
-            print(f"Try {self.tries} failed. Response: {response}")
-            return self.categorize_transactions(transactions)
+            retries = 5
+            valid = self.valid_response(response, subset)
+            while not valid[0] and retries > 0:
+                print(
+                    f"Response validation failed.\nError:{valid[1]}\nResponse: {response}"
+                )
+                response = self.get_categories(prompt)
+                valid = self.valid_response(response, subset)
+                retries -= 1
 
-        return response  # TODO: For testing the response
+            if not valid[0]:
+                raise Exception("Failed to validate response after 5 attempts.")
 
-        # TODO: attach_categories
-        # then
-        # return self.transactions
+            transactions[i : i + 10] = self.attach_categories(response, subset)
+
+        return transactions

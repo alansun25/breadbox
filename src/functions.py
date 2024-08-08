@@ -1,5 +1,6 @@
 from src.classes import NotionClient, GroqClient, Transaction
 from src.constants import BANKS, COLNAMES
+import os
 import pandas as pd
 
 
@@ -28,28 +29,25 @@ def parse_transactions(file: str, bank: str):
     return transactions
 
 
-def get_file_string(directory, bank):
-    return f"{directory}/{bank}.csv"
+def get_filepath(folder_path: str, bank: str):
+    return f"{folder_path}/{bank}.csv"
 
 
-def get_parsed_transactions(transactions_folder):
-    directory = f"../transactions/{transactions_folder}"
+def get_parsed_transactions(folder_path: str):
     return {
-        bank: parse_transactions(get_file_string(directory, bank))
+        bank: parse_transactions(get_filepath(folder_path, bank), bank)
         for bank in BANKS
+        if os.path.exists(get_filepath(folder_path, bank))
     }
 
 
-def update_transactions_table(transactions_folder):
+def update_transactions_table(folder_path: str):
     notion = NotionClient()
-    groq = GroqClient()
-
     categories = notion.get_categories()
+    groq = GroqClient(categories)
 
-    parsed_transactions = get_parsed_transactions(transactions_folder)
+    parsed_transactions = get_parsed_transactions(folder_path)
     for bank, transactions in parsed_transactions.items():
-        # TODO: In place?
-        transactions = groq.categorize_transactions(
-            bank, transactions, categories
-        )
-        notion.add_transactions(transactions)
+        transactions = groq.categorize_transactions(transactions)
+        print(transactions)
+        # notion.add_transactions(transactions)

@@ -19,11 +19,17 @@ class NotionClient:
         self.db_id = os.environ.get("TEST_DATABASE_ID")
         # TODO: Change to actual DB when ready
 
+    def strip_whitespace(self, string: str):
+        if string.startswith(" ") or string.endswith(" "):
+            return self.strip_whitespace(string.strip())
+
+        return string
+
     def get_categories(self):
         response = self.client.databases.retrieve(database_id=self.db_id)
         options = response["properties"]["category"]["select"]["options"]
         categories = {
-            option["name"][2:].replace(" ", ""): option["name"]
+            self.strip_whitespace(option["name"][2:]): option["name"]
             for option in options
         }
         return categories
@@ -51,17 +57,13 @@ class NotionClient:
 
 class GroqClient:
 
-    def __init__(
-        self,
-        transactions: list[Transaction],
-        categories: dict[str, str],
-    ):
+    def __init__(self, categories: dict[str, str]):
         self.client = Groq(api_key=os.environ.get("GROQ_TOKEN"))
-        self.transactions = transactions
         self.categories = categories
+        self.tries = 0
 
     def format_transaction(self, index: int, transaction: Transaction):
-        if transaction.category is not None:
+        if transaction["category"] is not None:
             template = "{index}. Merchant: {merchant}, Price: {spend}, Category: {category}"
             return template.format(
                 index=index,
@@ -77,11 +79,11 @@ class GroqClient:
                 spend=transaction["spend"],
             )
 
-    def generate_prompt(self):
-        with open(f"./prompt.txt", "r") as prompt:
+    def generate_prompt(self, transactions: list[Transaction]):
+        with open(os.path.abspath("src/prompt.txt"), "r") as prompt:
             formatted_transactions = [
                 self.format_transaction(i + 1, transaction)
-                for i, transaction in enumerate(self.transactions)
+                for i, transaction in enumerate(transactions)
             ]
             transactions_str = "\n".join(formatted_transactions)
             categories_str = "\n".join(self.categories.keys())
@@ -92,7 +94,7 @@ class GroqClient:
 
             return formatted_prompt
 
-    def llm_categorization(self, prompt: str):
+    def get_categories(self, prompt):
         chat_completion = self.client.chat.completions.create(
             messages=[
                 {
@@ -112,17 +114,27 @@ class GroqClient:
     def valid_response(
         self,
         response: str | None,
+        transactions: list[Transaction],
     ):
         if response is None:
+            print("No response received.")
             return False
 
-        llm_categories = response.split(", ")
-        proper_num = len(llm_categories) == len(self.transactions)
-        proper_content = all(
-            category in self.categories.keys() for category in llm_categories
-        )
+        llm_categories = [category.strip() for category in response.split(",")]
 
-        return all([proper_num, proper_content])
+        num_categories = len(llm_categories)
+        num_transactions = len(transactions)
+        if not num_categories == num_transactions:
+            print(
+                f"Invalid response string. Num categories: {num_categories}, Num transactions: {num_transactions}"
+            )
+            return False
+
+        if not all(
+            category in self.categories.keys() for category in llm_categories
+        ):
+            print(f"Invalid categories received in response.")
+            return False
 
     def attach_categories(
         self,
@@ -130,13 +142,17 @@ class GroqClient:
     ):
         categories = generated_categories.split(", ")
 
-    def categorize_transactions(self):
-        prompt = self.generate_prompt()  # TODO: Move to init
-        response = self.llm_categorization(prompt)
+    def categorize_transactions(self, transactions: list[Transaction]):
+        self.tries += 1
+        prompt = self.generate_prompt(transactions)
+        response = self.get_categories(prompt)
 
-        if not self.valid_response(response):
-            return self.categorize_transactions()
+        if not self.valid_response(response, transactions):
+            print(f"Try {self.tries} failed. Response: {response}")
+            return self.categorize_transactions(transactions)
 
-        # TODO
+        return response  # TODO: For testing the response
 
-        return self.transactions
+        # TODO: attach_categories
+
+        # return self.transactions

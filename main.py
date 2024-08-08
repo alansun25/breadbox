@@ -9,9 +9,9 @@ def main():
     args = parser.parse_args()
     transactions_folder = args.transactions_folder
 
+    load_dotenv()
     update_transactions_table(transactions_folder)
 
 
 if __name__ == "__main__":
-    load_dotenv()
     main()

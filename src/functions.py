@@ -48,5 +48,8 @@ def update_transactions_table(transactions_folder):
 
     parsed_transactions = get_parsed_transactions(transactions_folder)
     for bank, transactions in parsed_transactions.items():
-        groq.categorize(bank, transactions, categories)  # TODO: In place?
+        # TODO: In place?
+        transactions = groq.categorize_transactions(
+            bank, transactions, categories
+        )
         notion.add_transactions(transactions)

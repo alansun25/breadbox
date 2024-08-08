@@ -51,59 +51,92 @@ class NotionClient:
 
 class GroqClient:
 
-    def __init__(self):
-        self.client = Groq(api_key=os.environ.get("GROQ_TOKEN"))
-
-    # TODO: Account for lack of categories in the prompt instructions;
-    # this will allow me to standardize into one prompt
-    def format_transaction(self, index: int, transaction: Transaction):
-        template = "{index}. Merchant: {merchant}, Category: {category}, Price: {spend}"
-        return template.format(
-            index=index,
-            merchant=transaction["merchant"],
-            category=transaction["category"],
-            spend=transaction["spend"],
-        )
-
-    def categorize(
-        self, bank, transactions: list[Transaction], categories: dict[str, str]
+    def __init__(
+        self,
+        transactions: list[Transaction],
+        categories: dict[str, str],
     ):
-        # TODO
-        with open(f"../prompts/{bank}_prompt.txt", "r") as prompt:
+        self.client = Groq(api_key=os.environ.get("GROQ_TOKEN"))
+        self.transactions = transactions
+        self.categories = categories
+
+    def format_transaction(self, index: int, transaction: Transaction):
+        if transaction.category is not None:
+            template = "{index}. Merchant: {merchant}, Price: {spend}, Category: {category}"
+            return template.format(
+                index=index,
+                merchant=transaction["merchant"],
+                category=transaction["category"],
+                spend=transaction["spend"],
+            )
+        else:
+            template = "{index}. Merchant: {merchant}, Price: {spend}"
+            return template.format(
+                index=index,
+                merchant=transaction["merchant"],
+                spend=transaction["spend"],
+            )
+
+    def generate_prompt(self):
+        with open(f"./prompt.txt", "r") as prompt:
             formatted_transactions = [
                 self.format_transaction(i + 1, transaction)
-                for i, transaction in enumerate(transactions)
+                for i, transaction in enumerate(self.transactions)
             ]
             transactions_str = "\n".join(formatted_transactions)
-            categories_str = "\n".join(categories.keys())
+            categories_str = "\n".join(self.categories.keys())
 
             formatted_prompt = prompt.read().format(
                 categories=categories_str, transactions=transactions_str
             )
 
-            chat_completion = self.client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a budgeting assistant.",
-                    },
-                    {
-                        "role": "user",
-                        "content": formatted_prompt,
-                    },
-                ],
-                model="llama3-70b-8192",
-            )
+            return formatted_prompt
 
-    # def test(self):
-    #     chat_completion = self.client.chat.completions.create(
-    #         messages=[
-    #             {"role": "system", "content": "You are a friendly assistant."},
-    #             {
-    #                 "role": "user",
-    #                 "content": "Hi there! Please respond with a poem about the ocean.",
-    #             },
-    #         ],
-    #         model="llama3-70b-8192",
-    #     )
-    #     return chat_completion.choices[0].message.content
+    def llm_categorization(self, prompt: str):
+        chat_completion = self.client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a budgeting assistant.",
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            model="llama3-70b-8192",
+        )
+
+        return chat_completion.choices[0].message.content
+
+    def valid_response(
+        self,
+        response: str | None,
+    ):
+        if response is None:
+            return False
+
+        llm_categories = response.split(", ")
+        proper_num = len(llm_categories) == len(self.transactions)
+        proper_content = all(
+            category in self.categories.keys() for category in llm_categories
+        )
+
+        return all([proper_num, proper_content])
+
+    def attach_categories(
+        self,
+        generated_categories: str,
+    ):
+        categories = generated_categories.split(", ")
+
+    def categorize_transactions(self):
+        prompt = self.generate_prompt()  # TODO: Move to init
+        response = self.llm_categorization(prompt)
+
+        if not self.valid_response(response):
+            return self.categorize_transactions()
+
+        # TODO
+
+        return self.transactions

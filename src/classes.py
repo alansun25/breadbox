@@ -61,6 +61,11 @@ class GroqClient:
         self.client = Groq(api_key=os.environ.get("GROQ_TOKEN"))
         self.categories = categories
         self.tries = 0
+        self.system_message = self.get_system_message()
+
+    def get_system_message(self):
+        with open(os.path.abspath("src/input/system.txt"), "r") as system:
+            return system.read()
 
     def format_transaction(self, index: int, transaction: Transaction):
         if transaction["category"] is not None:
@@ -80,7 +85,7 @@ class GroqClient:
             )
 
     def generate_prompt(self, transactions: list[Transaction]):
-        with open(os.path.abspath("src/prompt.txt"), "r") as prompt:
+        with open(os.path.abspath("src/input/prompt.txt"), "r") as prompt:
             formatted_transactions = [
                 self.format_transaction(i + 1, transaction)
                 for i, transaction in enumerate(transactions)
@@ -95,11 +100,15 @@ class GroqClient:
             return formatted_prompt
 
     def get_categories(self, prompt):
+        # TODO: The LLM has trouble handling a lot of transactions at once.
+        # Break this into a multi-turn conversation that processes 10
+        # transactions at a time. Need to modify prompt.
+
         chat_completion = self.client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a budgeting assistant.",
+                    "content": self.system_message,
                 },
                 {
                     "role": "user",
@@ -154,5 +163,5 @@ class GroqClient:
         return response  # TODO: For testing the response
 
         # TODO: attach_categories
-
+        # then
         # return self.transactions

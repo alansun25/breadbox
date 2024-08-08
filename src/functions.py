@@ -49,5 +49,5 @@ def update_transactions_table(folder_path: str):
     parsed_transactions = get_parsed_transactions(folder_path)
     for bank, transactions in parsed_transactions.items():
         transactions = groq.categorize_transactions(transactions)
-        print(transactions)
+        print(transactions)  # TODO: For testing
         # notion.add_transactions(transactions)

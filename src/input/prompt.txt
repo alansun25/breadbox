@@ -1,0 +1,5 @@
+Categories:
+{categories}
+
+Transactions:
+{transactions}

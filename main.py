@@ -5,12 +5,12 @@ from src.functions import update_transactions_table
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument("--folder_path")
+    parser.add_argument("--folder")
     args = parser.parse_args()
-    folder_path = args.folder_path
+    folder = args.folder
 
     load_dotenv()
-    update_transactions_table(folder_path)
+    update_transactions_table(folder)
 
 
 if __name__ == "__main__":

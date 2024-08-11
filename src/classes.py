@@ -1,8 +1,10 @@
-from datetime import datetime
+import datetime as dt
 from notion_client import Client
 from groq import Groq
 from typing import Optional, TypedDict
 import os
+from pprint import pprint
+import sys
 
 
 class Transaction(TypedDict):
@@ -16,8 +18,10 @@ class NotionClient:
 
     def __init__(self):
         self.client = Client(auth=os.environ.get("NOTION_TOKEN"))
-        self.db_id = os.environ.get("TEST_DATABASE_ID")
+
         # TODO: Change to actual DB when ready
+        self.transactions_db_id = os.environ.get("TEST_DATABASE_ID")
+        self.summary_db_id = os.environ.get("SUMMARY_DATABASE_ID")
 
     def strip_whitespace(self, string: str):
         if string.startswith(" ") or string.endswith(" "):
@@ -25,17 +29,46 @@ class NotionClient:
 
         return string
 
+    def get_current_month_and_year(self):
+        current_date = dt.date.today()
+        previous_month = current_date.replace(day=1) - dt.timedelta(days=1)
+        previous_month_name = previous_month.strftime("%B")[:3]
+        current_year = current_date.strftime("%Y")
+
+        return f"{previous_month_name} '{current_year[2:]}"
+
+    def add_venmo_repay(self, repay_value: float):
+        month_and_year = self.get_current_month_and_year()
+        page_details = self.client.databases.query(
+            **{
+                "database_id": self.summary_db_id,
+                "filter": {
+                    "property": "month",
+                    "formula": {
+                        "string": {"equals": month_and_year},
+                    },
+                },
+            }
+        )
+        page_id = page_details["results"][0]["id"]
+
+        self.client.pages.update(
+            **{
+                "page_id": page_id,
+                "properties": {"venmo repay": {"number": repay_value}},
+            }
+        )
+
     def get_categories(self):
-        response = self.client.databases.retrieve(database_id=self.db_id)
+        response = self.client.databases.retrieve(
+            database_id=self.transactions_db_id
+        )
         options = response["properties"]["category"]["select"]["options"]
         categories = {
             self.strip_whitespace(option["name"][2:]): option["name"]
             for option in options
         }
         return categories
-
-    def get_iso_date(self, date: str):
-        return datetime.strptime(date, "%m/%d/%Y").isoformat()[:10]
 
     def get_transaction_object(self, transaction: Transaction):
         return {
@@ -44,15 +77,18 @@ class NotionClient:
             },
             "category": {"select": {"name": transaction["category"]}},
             "spend": {"number": transaction["spend"]},
-            "date": {"date": {"start": self.get_iso_date(transaction["date"])}},
+            "date": {"date": {"start": transaction["date"]}},
         }
 
     def add_transactions(self, transactions: list[Transaction]):
         for transaction in transactions:
             props = self.get_transaction_object(transaction)
             self.client.pages.create(
-                parent={"database_id": self.db_id}, properties=props
+                parent={"database_id": self.transactions_db_id},
+                properties=props,
             )
+
+        print(f"{len(transactions)} added to Notion.")
 
 
 class GroqClient:
@@ -145,7 +181,10 @@ class GroqClient:
         response: str,
         transactions: list[Transaction],
     ):
-        categories = [category.strip() for category in response.split(",")]
+        categories = [
+            self.categories[category.strip()]
+            for category in response.split(",")
+        ]
         for i, transaction in enumerate(transactions):
             transaction["category"] = categories[i]
 
@@ -161,7 +200,7 @@ class GroqClient:
             valid = self.valid_response(response, subset)
             while not valid[0] and retries > 0:
                 print(
-                    f"Response validation failed.\nError:{valid[1]}\nResponse: {response}"
+                    f"Response validation failed.\nError: {valid[1]}\nResponse: {response}"
                 )
                 response = self.get_categories(prompt)
                 valid = self.valid_response(response, subset)

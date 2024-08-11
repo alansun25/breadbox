@@ -3,8 +3,6 @@ from notion_client import Client
 from groq import Groq
 from typing import Optional, TypedDict
 import os
-from pprint import pprint
-import sys
 
 
 class Transaction(TypedDict):

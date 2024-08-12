@@ -9,6 +9,7 @@ class Transaction(TypedDict):
     merchant: str
     spend: float
     date: str
+    method: str
     category: Optional[str]
 
 
@@ -16,10 +17,9 @@ class NotionClient:
 
     def __init__(self):
         self.client = Client(auth=os.environ.get("NOTION_TOKEN"))
-
-        # TODO: Change to actual DB when ready
-        self.transactions_db_id = os.environ.get("TEST_DATABASE_ID")
+        self.transactions_db_id = os.environ.get("TRANSACTIONS_DATABASE_ID")
         self.summary_db_id = os.environ.get("SUMMARY_DATABASE_ID")
+        self.prev_month_summary_page_id = self.get_prev_month_summary_page_id()
 
     def strip_whitespace(self, string: str):
         if string.startswith(" ") or string.endswith(" "):
@@ -27,29 +27,46 @@ class NotionClient:
 
         return string
 
-    def get_current_month_and_year(self):
+    def get_prev_month_and_year(self):
         current_date = dt.date.today()
         previous_month = current_date.replace(day=1) - dt.timedelta(days=1)
         previous_month_name = previous_month.strftime("%B")[:3]
         current_year = current_date.strftime("%Y")
 
-        return f"{previous_month_name} '{current_year[2:]}"
+        return f"{previous_month_name} {current_year}"
 
-    def add_venmo_repay(self, repay_value: float):
-        month_and_year = self.get_current_month_and_year()
+    def get_prev_month_summary_page_id(self):
+        month_and_year = self.get_prev_month_and_year()
         page_details = self.client.databases.query(
             **{
                 "database_id": self.summary_db_id,
                 "filter": {
-                    "property": "month",
-                    "formula": {
-                        "string": {"equals": month_and_year},
+                    "property": "name",
+                    "rich_text": {
+                        "contains": month_and_year.lower(),
                     },
                 },
             }
         )
         page_id = page_details["results"][0]["id"]
 
+        return page_id
+
+    def add_paychecks(self, paychecks_values: list[float]):
+        page_id = self.prev_month_summary_page_id
+        paychecks_object = {
+            f"paycheck {i + 1}": {"number": paycheck}
+            for i, paycheck in enumerate(paychecks_values)
+        }
+        self.client.pages.update(
+            **{
+                "page_id": page_id,
+                "properties": paychecks_object,
+            }
+        )
+
+    def add_venmo_repay(self, repay_value: float):
+        page_id = self.prev_month_summary_page_id
         self.client.pages.update(
             **{
                 "page_id": page_id,
@@ -75,6 +92,7 @@ class NotionClient:
             },
             "category": {"select": {"name": transaction["category"]}},
             "spend": {"number": transaction["spend"]},
+            "method": {"select": {"name": transaction["method"]}},
             "date": {"date": {"start": transaction["date"]}},
         }
 
@@ -85,8 +103,6 @@ class NotionClient:
                 parent={"database_id": self.transactions_db_id},
                 properties=props,
             )
-
-        print(f"{len(transactions)} added to Notion.")
 
 
 class GroqClient:

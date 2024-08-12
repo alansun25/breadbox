@@ -15,6 +15,7 @@ def create_transaction_object(
     merchant: str,
     spend: float,
     date: str,
+    method: str,
     category: str = None,
     not_datetime: bool = True,
 ):
@@ -27,6 +28,7 @@ def create_transaction_object(
         merchant=merchant,
         spend=spend,
         date=date,
+        method=method,
         category=category,
     )
 
@@ -46,10 +48,13 @@ def parse_chase(path: str):
             x["Description"],
             abs(x["Amount"]),
             x["Post Date"],
+            "chase",
             x["Category"],
         ),
         axis=1,
     ).tolist()
+
+    print(f"{len(transactions)} Chase transactions parsed.")
 
     return transactions
 
@@ -58,7 +63,9 @@ def parse_mastercard(path: str):
     df = pd.read_csv(path, names=["date", "spend", "x", "y", "merchant"])
 
     # Ignoring rent payment which is auto-populated by Notion table already
-    is_transaction = (df["spend"] < 0) & (~df["merchant"].str.contains("BPS*BILT", regex=False))
+    is_transaction = (df["spend"] < 0) & (
+        ~df["merchant"].str.contains("BPS*BILT", regex=False)
+    )
     df = df[is_transaction]
 
     transactions = df.apply(
@@ -66,9 +73,12 @@ def parse_mastercard(path: str):
             x["merchant"],
             abs(x["spend"]),
             x["date"],
+            "mastercard",
         ),
         axis=1,
     ).tolist()
+
+    print(f"{len(transactions)} Mastercard transactions parsed.")
 
     return transactions
 
@@ -76,18 +86,30 @@ def parse_mastercard(path: str):
 def split_eversource(row: pd.Series):
     if "EVERSOURCE" in row["Description"]:
         row["Withdrawal"] = str(parse_spend(row["Withdrawal"]) / 4)
-        
+
     return row
+
+
+def add_paychecks(df: pd.DataFrame):
+    is_paycheck = df["Description"].str.contains("MICROSOFT EDIPAYMENT")
+    paychecks_dict = df[is_paycheck].to_dict(orient="records")
+    paychecks_values = [
+        parse_spend(paycheck["Deposit"]) for paycheck in paychecks_dict
+    ]
+
+    notion.add_paychecks(paychecks_values)
 
 
 def parse_schwab(path: str):
     df = pd.read_csv(path)
 
+    add_paychecks(df)
+
     is_eversource = df["Description"].str.contains("EVERSOURCE", regex=False)
     is_transaction = (
-        (df["Type"].str.contains("DEBIT", regex=False)) 
+        (df["Type"].str.contains("DEBIT", regex=False))
         | (df["Type"].str.contains("VISA", regex=False))
-        ) | (is_eversource)
+    ) | (is_eversource)
     df = df[is_transaction].apply(split_eversource, axis=1)
 
     transactions = df.apply(
@@ -95,10 +117,13 @@ def parse_schwab(path: str):
             x["Description"],
             parse_spend(x["Withdrawal"]),
             x["Date"],
+            "schwab",
         ),
         axis=1,
     ).tolist()
-    
+
+    print(f"{len(transactions)} Schwab transactions parsed.")
+
     return transactions
 
 
@@ -121,13 +146,9 @@ def parse_venmo(path: str):
     # Ignore Venmo payments for utilities and rent and anything
     # that isn't a payment or charge
     is_not_utilities_or_rent = (
-        (~df["Note"].str.lower().str.contains("utilities", regex=False, na=False)) 
-        & (~df["Note"].str.lower().str.contains("rent", regex=False, na=False))
-    )
-    is_payment_or_charge = (
-        (df["Type"] == "Payment") 
-        | (df["Type"] == "Charge")
-    )
+        ~df["Note"].str.lower().str.contains("utilities", regex=False, na=False)
+    ) & (~df["Note"].str.lower().str.contains("rent", regex=False, na=False))
+    is_payment_or_charge = (df["Type"] == "Payment") | (df["Type"] == "Charge")
     df = df[is_not_utilities_or_rent & is_payment_or_charge]
 
     me = "Alan Sun"
@@ -142,15 +163,19 @@ def parse_venmo(path: str):
 
     transactions = df.apply(
         lambda x: create_transaction_object(
-            f"{x["Note"]} (venmo)",
+            x["Note"],
             parse_spend(x["Amount (total)"]),
             x["Datetime"],
+            "venmo",
             not_datetime=False,
         ),
         axis=1,
     ).tolist()
 
+    print(f"{len(transactions)} Venmo transactions parsed.")
+
     return transactions
+
 
 def parse_transactions(folder: str, bank: str):
     path = f"{folder}/{bank}.csv"
@@ -175,12 +200,17 @@ def get_parsed_transactions(folder: str):
         transactions = parse_transactions(folder, bank)
         parsed_transactions.extend(transactions)
 
+    print(f"{len(parsed_transactions)} total transactions parsed.")
+
     return parsed_transactions
 
 
 def update_transactions_table(folder: str):
     groq = GroqClient(notion.get_categories())
-
     parsed_transactions = get_parsed_transactions(folder)
     categorized_transactions = groq.categorize_transactions(parsed_transactions)
     notion.add_transactions(categorized_transactions)
+
+    print(
+        f"{len(categorized_transactions)} total transactions categorize and uploaded to Notion."
+    )

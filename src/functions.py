@@ -212,5 +212,5 @@ def update_transactions_table(folder: str):
     notion.add_transactions(categorized_transactions)
 
     print(
-        f"{len(categorized_transactions)} total transactions categorize and uploaded to Notion."
+        f"{len(categorized_transactions)} total transactions categorized and uploaded to Notion."
     )

@@ -32,6 +32,8 @@ class NotionClient:
         previous_month = current_date.replace(day=1) - dt.timedelta(days=1)
         previous_month_name = previous_month.strftime("%B")[:3]
         current_year = current_date.strftime("%Y")
+        if previous_month_name == "Dec":
+            current_year = str(current_date.year - 1)
 
         return f"{previous_month_name} {current_year}"
 
